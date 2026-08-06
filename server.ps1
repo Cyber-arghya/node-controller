@@ -259,5 +259,45 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
+# ==============================================================================
+# VPC FUNCTION INJECTOR FOR POWERSHELL PROFILE
+# ==============================================================================
 
+$profileDir = Split-Path -Parent $PROFILE
+if (-not (Test-Path $profileDir)) {
+    New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+}
+
+if (-not (Test-Path $PROFILE)) {
+    New-Item -ItemType File -Force -Path $PROFILE | Out-Null
+}
+
+$vpcFunction = @"
+
+# --- Open NativePCController Keymap Folder in VS Code ---
+function vpc {
+    param()
+    `$targetDir = "`$env:LOCALAPPDATA\NativePcController"
+    if (Test-Path `$targetDir) {
+        code `$targetDir
+        Write-Host "[+] Opened Native PC Controller folder in VS Code." -ForegroundColor Green
+    } else {
+        Write-Host "[!] Directory not found: `$targetDir" -ForegroundColor Red
+    }
+}
+"@
+
+# Check if 'vpc' function already exists in profile to avoid duplicates
+$profileContent = Get-Content $PROFILE -ErrorAction SilentlyContinue
+if ($profileContent -notmatch "function vpc") {
+    Add-Content -Path $PROFILE -Value $vpcFunction
+    Write-Host "[+] Successfully injected 'vpc' function into your PowerShell profile!" -ForegroundColor Green
+} else {
+    Write-Host "[*] 'vpc' function already exists in your PowerShell profile." -ForegroundColor Yellow
+}
+
+
+# Reload profile to apply changes immediately
+. $PROFILE
+Write-Host "[*] Profile reloaded. Type 'vpc' anywhere in PowerShell to test." -ForegroundColor Cyan
 Write-Host "`n[+] SUCCESS: Native PC Controller v2.9 installed and running in background!" -ForegroundColor Green
