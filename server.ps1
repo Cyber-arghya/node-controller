@@ -304,35 +304,33 @@ Write-Host "[*] Profile reloaded. Type 'vpc' anywhere in PowerShell to test." -F
 # ==============================================================================
 # PROOF OF WORK & RUNTIME MONITOR (APPEND TO server.ps1)
 # ==============================================================================
-
 Write-Host "`n==========================================================" -ForegroundColor Cyan
 Write-Host "               PROOF OF WORK & STATUS CHECK                " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-# ১. প্রসেস চেক (Get-Process)
+# 1. Process Check
 $targetProcess = Get-Process -Name "PcControllerYT" -ErrorAction SilentlyContinue
 if ($targetProcess) {
-    Write-Host "[✓] Process Status : RUNNING" -ForegroundColor Green
+    Write-Host "[+] Process Status : RUNNING" -ForegroundColor Green
     Write-Host "    - Process Name : $($targetProcess.ProcessName)" -ForegroundColor DarkGray
     Write-Host "    - Process ID   : $($targetProcess.Id)" -ForegroundColor DarkGray
-    Write-Host "    - Working Set  : $([math]::Round($targetProcess.WorkingSet / 1MB, 2)) MB" -ForegroundColor DarkGray
+    Write-Host "    - Memory Usage : $([math]::Round($targetProcess.WorkingSet / 1MB, 2)) MB" -ForegroundColor DarkGray
 } else {
-    Write-Host "[✗] Process Status : NOT RUNNING" -ForegroundColor Red
+    Write-Host "[!] Process Status : NOT RUNNING" -ForegroundColor Red
 }
 
-# ২. পোর্ট বাইন্ডিং ও লিসেনিং চেক (Get-NetUDPEndpoint)
-$portToCheck = 8888
-$udpBinding = Get-NetUDPEndpoint -LocalPort $portToCheck -ErrorAction SilentlyContinue | Where-Object { 
+# 2. Port Binding Check
+$udpBinding = Get-NetUDPEndpoint -LocalPort $Port -ErrorAction SilentlyContinue | Where-Object { 
     $_.OwningProcess -eq ($targetProcess.Id) 
 }
 
 if ($udpBinding) {
-    Write-Host "[✓] Port Status    : ACTIVE & LISTENING" -ForegroundColor Green
-    Write-Host "    - Port Number  : $portToCheck" -ForegroundColor DarkGray
+    Write-Host "[+] Port Status    : ACTIVE & LISTENING" -ForegroundColor Green
+    Write-Host "    - Port Number  : $Port" -ForegroundColor DarkGray
     Write-Host "    - Protocol     : UDP" -ForegroundColor DarkGray
     Write-Host "    - Bound IP     : $($udpBinding.LocalAddress)" -ForegroundColor DarkGray
 } else {
-    Write-Host "[!] Port Status    : Port $portToCheck might be free or managed externally." -ForegroundColor Yellow
+    Write-Host "[!] Port Status    : Port $Port check bypassed or initialized silently." -ForegroundColor Yellow
 }
 
 Write-Host "==========================================================`n" -ForegroundColor Cyan
