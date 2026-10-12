@@ -362,21 +362,20 @@ function Get-ProfileFunctions {
         Write-Host " Path   : $profPath" -ForegroundColor Yellow
         Write-Host "=================================================" -ForegroundColor Cyan
         
-        if (Test-Path $profPath) {
-            $content = Get-Content $profPath -Raw
-            $matches = [System.Text.RegularExpressions.Regex]::Matches($content, '(?i)function\s+([a-zA-Z0-9\-_]+)')
-            
-            if ($matches.Count -gt 0) {
-                Write-Host "[+] Found functions in this profile:" -ForegroundColor Green
-                foreach ($m in $matches) {
-                    Write-Host "    - $($m.Groups[1].Value)" -ForegroundColor White
-                }
-            } else {
-                Write-Host "[!] No custom functions found in this profile." -ForegroundColor DarkGray
-            }
-        } else {
-            Write-Host "[!] Profile file does not exist." -ForegroundColor Red
+       if (Test-Path $profPath) {
+    $content = Get-Content $profPath -Raw
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$null, [ref]$null)
+    $funcs = $ast.FindAll({$args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $true)
+    
+    if ($funcs.Count -gt 0) {
+        Write-Host "[+] Found functions in this profile:" -ForegroundColor Green
+        foreach ($f in $funcs) {
+            Write-Host "    - $($f.Name)" -ForegroundColor White
         }
+    } else {
+        Write-Host "[!] No custom functions found in this profile." -ForegroundColor DarkGray
+    }
+}
         Write-Host ""
     }
 }
@@ -465,7 +464,8 @@ function Get-AppStatus {
 '@
 
 # --- 1. DYNAMIC EXTRACTION OF FUNCTION NAMES ---
-$newFunctions = [System.Text.RegularExpressions.Regex]::Matches($functionsBlock, '(?i)function\s+([a-zA-Z0-9\-_]+)') | ForEach-Object { $_.Groups[1].Value }
+$astBlock = [System.Management.Automation.Language.Parser]::ParseInput($functionsBlock, [ref]$null, [ref]$null)
+$newFunctions = $astBlock.FindAll({$args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $true) | ForEach-Object { $_.Name }
 $newFunctionsList = $newFunctions -join "', '"
 
 # --- 2. PROFILE PATHS ---
