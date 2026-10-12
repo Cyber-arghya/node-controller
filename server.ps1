@@ -501,7 +501,7 @@ foreach ($prof in $profilesToInject) {
 
     # Append the fresh block cleanly
     $content = $content.TrimEnd() + "`n`n$functionsBlock`n"
-    Set-Content -Path $prof -Value$content
+    Set-Content -Path $prof -Value $content
     Write-Host "[+] Successfully injected/updated '$newFunctionsList' into:$prof" -ForegroundColor Green
 }
 
