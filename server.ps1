@@ -262,7 +262,7 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Pr
 Start-ScheduledTask -TaskName $taskName
 
 # ==============================================================================
-# PROFILE INJECTOR FOR POWERSHELL 5 & 7 (VPC & GET-HEXKEY)
+# DYNAMIC PROFILE INJECTOR FOR POWERSHELL
 # ==============================================================================
 
 $functionsBlock = @'
@@ -328,7 +328,8 @@ function Get-HexKey {
                     Write-Host "$hexFormat" -ForegroundColor Green
                     
                     $lastKeys[$i] =$true
-                } elseif (-not $isPressed -and$lastKeys[$i]) {$lastKeys[$i] =$false
+                } elseif (-not $isPressed -and $lastKeys[$i]) {
+                    $lastKeys[$i] =$false
                 }
             }
             Start-Sleep -Milliseconds 10
@@ -337,15 +338,62 @@ function Get-HexKey {
         Write-Host "`n[x] Detector Stopped." -ForegroundColor DarkGray
     }
 }
+
+# --- Display All Profile Functions ---
+function Get-ProfileFunctions {
+    $profiles = [ordered]@{
+        "Windows PowerShell (v5.1)"  = "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+        "PowerShell Core (v6/v7+)"   = "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
+        "Current Active (`$PROFILE)"  = $PROFILE
+    }
+
+    $checkedPaths = @()
+
+    foreach ($profileType in $profiles.Keys) {
+        $profPath = $profiles[$profileType].ToString()
+
+        if ($checkedPaths -contains $profPath) {
+            continue 
+        }
+        $checkedPaths += $profPath
+
+        Write-Host "=================================================" -ForegroundColor Cyan
+        Write-Host " Profile: $profileType" -ForegroundColor Green
+        Write-Host " Path   : $profPath" -ForegroundColor Yellow
+        Write-Host "=================================================" -ForegroundColor Cyan
+        
+        if (Test-Path $profPath) {
+            $content = Get-Content $profPath -Raw
+            $matches = [System.Text.RegularExpressions.Regex]::Matches($content, '(?i)function\s+([a-zA-Z0-9\-_]+)')
+            
+            if ($matches.Count -gt 0) {
+                Write-Host "[+] Found functions in this profile:" -ForegroundColor Green
+                foreach ($m in $matches) {
+                    Write-Host "    - $($m.Groups[1].Value)" -ForegroundColor White
+                }
+            } else {
+                Write-Host "[!] No custom functions found in this profile." -ForegroundColor DarkGray
+            }
+        } else {
+            Write-Host "[!] Profile file does not exist." -ForegroundColor Red
+        }
+        Write-Host ""
+    }
+}
 '@
 
+# --- DYNAMIC EXTRACTION OF FUNCTION NAMES ---
+# $functionsBlock থেকে রেজেক্সের মাধ্যমে সব ফাংশনের নাম ডাইনামিকালি বের করা হচ্ছে
+$newFunctions = [System.Text.RegularExpressions.Regex]::Matches($functionsBlock, '(?i)function\s+([a-zA-Z0-9\-_]+)') | ForEach-Object { $_.Groups[1].Value }
+$newFunctionsList = $newFunctions -join "', '"
+
 # PowerShell 5 and 7 profile paths
-$profiles = @(
+$profilesToInject = @(
     "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1",
     "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
 )
 
-foreach ($prof in $profiles) {
+foreach ($prof in $profilesToInject) {
     $profDir = Split-Path -Parent $prof
     
     if (-not (Test-Path $profDir)) {
@@ -356,20 +404,33 @@ foreach ($prof in $profiles) {
         New-Item -ItemType File -Force -Path $prof | Out-Null
     }
 
-    $profileContent = Get-Content $prof -ErrorAction SilentlyContinue
+    $profileContent = Get-Content $prof -Raw -ErrorAction SilentlyContinue
     
-    if ($profileContent -notmatch "function vpc") {
+    # ডাইনামিক চেক: নতুন ব্লক-এর কোনো ফাংশন মিসিং আছে কিনা
+    $needsInjection = $false
+    foreach ($func in $newFunctions) {
+        if ($profileContent -notmatch "(?i)function\s+$func") {
+            $needsInjection = $true
+            break
+        }
+    }
+    
+    if ($needsInjection) {
         Add-Content -Path $prof -Value "`n$functionsBlock"
-        Write-Host "[+] Successfully injected 'vpc' & 'Get-HexKey' functions into: $prof" -ForegroundColor Green
+        Write-Host "[+] Successfully injected '$newFunctionsList' into:$prof" -ForegroundColor Green
     } else {
-        Write-Host "[*] Functions already exist in: $prof" -ForegroundColor Yellow
+        Write-Host "[*] Functions ('$newFunctionsList') already exist in:$prof" -ForegroundColor Yellow
     }
 }
 
 # Reload current profile to apply changes immediately
 if (Test-Path $PROFILE) { .$PROFILE }
-Write-Host "[*] Profiles updated. Type 'vpc' or 'Get-HexKey' anywhere in PowerShell to test." -ForegroundColor Cyan
 
+Write-Host "`n[*] Profiles updated! You can now use '$newFunctionsList'." -ForegroundColor Cyan 
+Write-Host "[*] Running 'Get-ProfileFunctions' to show current status:`n" -ForegroundColor Magenta
+
+# স্ক্রিপ্ট শেষে প্রোফাইলগুলোর বর্তমান অবস্থা দেখানোর জন্য নতুন ফাংশনটি কল করা হচ্ছে
+Get-ProfileFunctions
 # ==============================================================================
 # PROOF OF WORK & RUNTIME MONITOR (APPEND TO server.ps1)
 # ==============================================================================
