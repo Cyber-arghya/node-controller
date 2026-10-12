@@ -380,55 +380,141 @@ function Get-ProfileFunctions {
         Write-Host ""
     }
 }
+function Remove-ProfileFunction {
+    [CmdletBinding()]
+    param ([Parameter(Mandatory=$true, HelpMessage="Enter the name of the function to remove")][string]$FunctionName)
+    
+    $profiles = @("$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1", "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1")
+    $removedAny = $false
+
+    foreach ($prof in $profiles) {
+        if (Test-Path $prof) {
+            $content = Get-Content $prof -Raw
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$null, [ref]$null)
+            $funcs = $ast.FindAll({$args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $FunctionName}, $true) | Sort-Object {$_.Extent.StartOffset} -Descending
+            
+            if ($funcs.Count -gt 0) {
+                foreach ($f in $funcs) {
+                    $content = $content.Substring(0, $f.Extent.StartOffset) + $content.Substring($f.Extent.EndOffset)
+                }
+                Set-Content -Path $prof -Value $content.Trim()
+                Write-Host "[+] Cleaned up '$FunctionName' from: $prof" -ForegroundColor Green
+                $removedAny = $true
+            }
+        }
+    }
+    if (-not $removedAny) { Write-Host "[!] Function '$FunctionName' not found in profiles." -ForegroundColor Yellow }
+}
+
+function Get-AppStatus {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true, HelpMessage="Enter the process name (without .exe)")]
+        [string]$ProcessName,
+
+        [Parameter(Mandatory=$true, HelpMessage="Enter the port number to check")]
+        [int]$Port
+    )
+
+    Write-Host "`n==========================================================" -ForegroundColor Cyan
+    Write-Host "               APP & PORT STATUS MONITOR                  " -ForegroundColor White
+    Write-Host "==========================================================" -ForegroundColor Cyan
+
+    # 1. Process Check (Fixed the space issue here)
+    $targetProcess = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue
+    
+    if ($targetProcess) {
+        $targetProcess =$targetProcess[0] 
+        Write-Host "[+] Process Status : RUNNING" -ForegroundColor Green
+        Write-Host "    - Process Name : $($targetProcess.ProcessName)" -ForegroundColor DarkGray
+        Write-Host "    - Process ID   : $($targetProcess.Id)" -ForegroundColor DarkGray
+        Write-Host "    - Memory Usage : $([math]::Round($targetProcess.WorkingSet / 1MB, 2)) MB" -ForegroundColor DarkGray
+    } else {
+        Write-Host "[!] Process Status : NOT RUNNING ($ProcessName)" -ForegroundColor Red
+        Write-Host "==========================================================`n" -ForegroundColor Cyan
+        return
+    }
+
+    # 2. Port Binding Check (Supports both UDP & TCP)
+    $udpBinding = Get-NetUDPEndpoint -LocalPort $Port -ErrorAction SilentlyContinue | Where-Object { 
+        $_.OwningProcess -eq $targetProcess.Id 
+    }
+    
+    $tcpBinding = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | Where-Object { 
+        $_.OwningProcess -eq $targetProcess.Id 
+    }
+
+    if ($udpBinding -or $tcpBinding) {
+        Write-Host "[+] Port Status    : ACTIVE & LISTENING" -ForegroundColor Green
+        Write-Host "    - Port Number  : $Port" -ForegroundColor DarkGray
+        
+        if ($udpBinding) { 
+            Write-Host "    - Protocol     : UDP" -ForegroundColor DarkGray 
+            Write-Host "    - Bound IP     : $($udpBinding.LocalAddress)" -ForegroundColor DarkGray
+        }
+        if ($tcpBinding) { 
+            Write-Host "    - Protocol     : TCP" -ForegroundColor DarkGray 
+            Write-Host "    - Bound IP     : $($tcpBinding.LocalAddress)" -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "[!] Port Status    : Port $Port is NOT bound to $ProcessName. (Or requires Admin rights)" -ForegroundColor Yellow
+    }
+
+    Write-Host "==========================================================`n" -ForegroundColor Cyan
+}
 '@
 
-# --- DYNAMIC EXTRACTION OF FUNCTION NAMES ---
-# $functionsBlock থেকে রেজেক্সের মাধ্যমে সব ফাংশনের নাম ডাইনামিকালি বের করা হচ্ছে
+# --- 1. DYNAMIC EXTRACTION OF FUNCTION NAMES ---
 $newFunctions = [System.Text.RegularExpressions.Regex]::Matches($functionsBlock, '(?i)function\s+([a-zA-Z0-9\-_]+)') | ForEach-Object { $_.Groups[1].Value }
 $newFunctionsList = $newFunctions -join "', '"
 
-# PowerShell 5 and 7 profile paths
+# --- 2. PROFILE PATHS ---
 $profilesToInject = @(
     "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1",
     "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
 )
 
+# --- 3. SURGICALLY REMOVE OLD VERSIONS AND INJECT ---
 foreach ($prof in $profilesToInject) {
+    # Ensure directory and file exist
     $profDir = Split-Path -Parent $prof
-    
-    if (-not (Test-Path $profDir)) {
-        New-Item -ItemType Directory -Force -Path $profDir | Out-Null
-    }
+    if (-not (Test-Path $profDir)) { New-Item -ItemType Directory -Force -Path $profDir | Out-Null }
+    if (-not (Test-Path $prof)) { New-Item -ItemType File -Force -Path $prof | Out-Null }
 
-    if (-not (Test-Path $prof)) {
-        New-Item -ItemType File -Force -Path $prof | Out-Null
-    }
+    $content = Get-Content $prof -Raw
+    if ($null -eq $content) { $content = "" }
 
-    $profileContent = Get-Content $prof -Raw -ErrorAction SilentlyContinue
+    # Parse profile safely using AST
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$null, [ref]$null)
     
-    # ডাইনামিক চেক: নতুন ব্লক-এর কোনো ফাংশন মিসিং আছে কিনা
-    $needsInjection = $false
-    foreach ($func in $newFunctions) {
-        if ($profileContent -notmatch "(?i)function\s+$func") {
-            $needsInjection = $true
-            break
+    # Find all matching functions and sort backward so string truncation doesn't ruin offsets
+    $funcsToRemove = $ast.FindAll({
+        $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $newFunctions -contains $args[0].Name
+    }, $true) | Sort-Object {$_.Extent.StartOffset} -Descending
+    
+    if ($funcsToRemove.Count -gt 0) {
+        foreach ($f in $funcsToRemove) {
+            $content = $content.Substring(0, $f.Extent.StartOffset) + $content.Substring($f.Extent.EndOffset)
         }
+        Write-Host "[*] Cleaned up $($funcsToRemove.Count) old/duplicate function(s) from $prof" -ForegroundColor Yellow
     }
-    
-    if ($needsInjection) {
-        Add-Content -Path $prof -Value "`n$functionsBlock"
-        Write-Host "[+] Successfully injected '$newFunctionsList' into:$prof" -ForegroundColor Green
-    } else {
-        Write-Host "[*] Functions ('$newFunctionsList') already exist in:$prof" -ForegroundColor Yellow
-    }
+
+    # Append the fresh block cleanly
+    $content = $content.TrimEnd() + "`n`n$functionsBlock`n"
+    Set-Content -Path $prof -Value$content
+    Write-Host "[+] Successfully injected/updated '$newFunctionsList' into:$prof" -ForegroundColor Green
 }
 
-# Reload current profile to apply changes immediately
+# --- 4. RELOAD ---
 if (Test-Path $PROFILE) { .$PROFILE }
 
 Write-Host "`n[*] Profiles updated! You can now use '$newFunctionsList'." -ForegroundColor Cyan 
 Write-Host "[*] Running 'Get-ProfileFunctions' to show current status:`n" -ForegroundColor Magenta
 
+# Check status if Get-ProfileFunctions exists
+if (Get-Command Get-ProfileFunctions -ErrorAction SilentlyContinue) {
+    Get-ProfileFunctions
+}
 # স্ক্রিপ্ট শেষে প্রোফাইলগুলোর বর্তমান অবস্থা দেখানোর জন্য নতুন ফাংশনটি কল করা হচ্ছে
 Get-ProfileFunctions
 # ==============================================================================
