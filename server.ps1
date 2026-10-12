@@ -515,8 +515,6 @@ Write-Host "[*] Running 'Get-ProfileFunctions' to show current status:`n" -Foreg
 if (Get-Command Get-ProfileFunctions -ErrorAction SilentlyContinue) {
     Get-ProfileFunctions
 }
-# স্ক্রিপ্ট শেষে প্রোফাইলগুলোর বর্তমান অবস্থা দেখানোর জন্য নতুন ফাংশনটি কল করা হচ্ছে
-Get-ProfileFunctions
 # ==============================================================================
 # PROOF OF WORK & RUNTIME MONITOR (APPEND TO server.ps1)
 # ==============================================================================
