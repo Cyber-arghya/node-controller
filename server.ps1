@@ -260,56 +260,115 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
+
 # ==============================================================================
-# VPC FUNCTION INJECTOR FOR POWERSHELL PROFILE
+# PROFILE INJECTOR FOR POWERSHELL 5 & 7 (VPC & GET-HEXKEY)
 # ==============================================================================
 
-$profileDir = Split-Path -Parent $PROFILE
-if (-not (Test-Path $profileDir)) {
-    New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
-}
-
-if (-not (Test-Path $PROFILE)) {
-    New-Item -ItemType File -Force -Path $PROFILE | Out-Null
-}
-
-$vpcFunction = @"
+$functionsBlock = @'
 
 # --- Open NativePCController Keymap Folder or File ---
 function vpc {
     param()
-    `$targetDir = "`$env:LOCALAPPDATA\NativePcController"
-    `$keymapPath = "`$targetDir\keymap.txt"
+    $targetDir = "$env:LOCALAPPDATA\NativePcController"
+    $keymapPath = "$targetDir\keymap.txt"
     
-    if (Test-Path `$targetDir) {
-        # VS Code (code) ইন্সটল করা আছে কিনা চেক করা হচ্ছে
+    if (Test-Path $targetDir) {
         if (Get-Command code -ErrorAction SilentlyContinue) {
-            code `$targetDir
+            code $targetDir
             Write-Host "[+] Opened Native PC Controller folder in VS Code." -ForegroundColor Green
         } else {
-            # VS Code না থাকলে সরাসরি Notepad-এ keymap.txt ওপেন হবে
-            notepad `$keymapPath
+            notepad $keymapPath
             Write-Host "[+] VS Code not found. Opened keymap.txt in Notepad." -ForegroundColor Yellow
         }
     } else {
-        Write-Host "[!] Directory not found: `$targetDir" -ForegroundColor Red
+        Write-Host "[!] Directory not found: $targetDir" -ForegroundColor Red
     }
 }
-"@
 
-# Check if 'vpc' function already exists in profile to avoid duplicates
-$profileContent = Get-Content $PROFILE -ErrorAction SilentlyContinue
-if ($profileContent -notmatch "function vpc") {
-    Add-Content -Path $PROFILE -Value $vpcFunction
-    Write-Host "[+] Successfully injected 'vpc' function into your PowerShell profile!" -ForegroundColor Green
-} else {
-    Write-Host "[*] 'vpc' function already exists in your PowerShell profile." -ForegroundColor Yellow
+# --- Advanced Hex Key Detector (Win Key & Esc Support) ---
+function Get-HexKey {
+    Add-Type -AssemblyName System.Windows.Forms
+
+    $csharp = @"
+    using System;
+    using System.Runtime.InteropServices;
+    public class KeyboardInput {
+        [DllImport("user32.dll")]
+        public static extern short GetAsyncKeyState(int vKey);
+    }
+"@
+    if (-not ("KeyboardInput" -as [type])) {
+        Add-Type -TypeDefinition $csharp
+    }
+
+    Write-Host "=================================================" -ForegroundColor Cyan
+    Write-Host "  [+] ADVANCED HEX KEY DETECTOR ACTIVATED" -ForegroundColor Green
+    Write-Host "  [>] Press ANY KEY (including Win Key & Esc)." -ForegroundColor Yellow
+    Write-Host "  [!] Press 'Ctrl + C' to stop and exit." -ForegroundColor Red
+    Write-Host "=================================================" -ForegroundColor Cyan
+
+    $lastKeys = @{}
+
+    try {
+        while ($true) {
+            for ($i = 1; $i -lt 255; $i++) {
+                $state = [KeyboardInput]::GetAsyncKeyState($i)
+                $isPressed = ($state -band 0x8000) -eq 0x8000
+
+                if ($isPressed -and -not $lastKeys[$i]) {
+                    $keyName = [enum]::GetName([System.Windows.Forms.Keys],$i)
+                    if (-not $keyName) {$keyName = "[Unknown]" }
+                    
+                    $hexFormat = "0x{0:X2}" -f $i
+                    
+                    Write-Host "[+] Key Pressed: " -NoNewline -ForegroundColor White
+                    Write-Host "$keyName ".PadRight(20) -NoNewline -ForegroundColor Yellow
+                    Write-Host "--> Hex Code: " -NoNewline -ForegroundColor White
+                    Write-Host "$hexFormat" -ForegroundColor Green
+                    
+                    $lastKeys[$i] =$true
+                } elseif (-not $isPressed -and$lastKeys[$i]) {$lastKeys[$i] =$false
+                }
+            }
+            Start-Sleep -Milliseconds 10
+        }
+    } finally {
+        Write-Host "`n[x] Detector Stopped." -ForegroundColor DarkGray
+    }
+}
+'@
+
+# PowerShell 5 and 7 profile paths
+$profiles = @(
+    "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1",
+    "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
+)
+
+foreach ($prof in $profiles) {
+    $profDir = Split-Path -Parent $prof
+    
+    if (-not (Test-Path $profDir)) {
+        New-Item -ItemType Directory -Force -Path $profDir | Out-Null
+    }
+
+    if (-not (Test-Path $prof)) {
+        New-Item -ItemType File -Force -Path $prof | Out-Null
+    }
+
+    $profileContent = Get-Content $prof -ErrorAction SilentlyContinue
+    
+    if ($profileContent -notmatch "function vpc") {
+        Add-Content -Path $prof -Value "`n$functionsBlock"
+        Write-Host "[+] Successfully injected 'vpc' & 'Get-HexKey' functions into: $prof" -ForegroundColor Green
+    } else {
+        Write-Host "[*] Functions already exist in: $prof" -ForegroundColor Yellow
+    }
 }
 
-
-# Reload profile to apply changes immediately
-. $PROFILE
-Write-Host "[*] Profile reloaded. Type 'vpc' anywhere in PowerShell to test." -ForegroundColor Cyan
+# Reload current profile to apply changes immediately
+if (Test-Path $PROFILE) { .$PROFILE }
+Write-Host "[*] Profiles updated. Type 'vpc' or 'Get-HexKey' anywhere in PowerShell to test." -ForegroundColor Cyan
 
 # ==============================================================================
 # PROOF OF WORK & RUNTIME MONITOR (APPEND TO server.ps1)
