@@ -275,13 +275,22 @@ if (-not (Test-Path $PROFILE)) {
 
 $vpcFunction = @"
 
-# --- Open NativePCController Keymap Folder in VS Code ---
+# --- Open NativePCController Keymap Folder or File ---
 function vpc {
     param()
     `$targetDir = "`$env:LOCALAPPDATA\NativePcController"
+    `$keymapPath = "`$targetDir\keymap.txt"
+    
     if (Test-Path `$targetDir) {
-        code `$targetDir
-        Write-Host "[+] Opened Native PC Controller folder in VS Code." -ForegroundColor Green
+        # VS Code (code) ইন্সটল করা আছে কিনা চেক করা হচ্ছে
+        if (Get-Command code -ErrorAction SilentlyContinue) {
+            code `$targetDir
+            Write-Host "[+] Opened Native PC Controller folder in VS Code." -ForegroundColor Green
+        } else {
+            # VS Code না থাকলে সরাসরি Notepad-এ keymap.txt ওপেন হবে
+            notepad `$keymapPath
+            Write-Host "[+] VS Code not found. Opened keymap.txt in Notepad." -ForegroundColor Yellow
+        }
     } else {
         Write-Host "[!] Directory not found: `$targetDir" -ForegroundColor Red
     }
